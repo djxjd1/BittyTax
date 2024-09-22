@@ -73,6 +73,27 @@ class DataSourceBase:
         if config.debug:
             print(f"{Fore.YELLOW}price: GET {url} {list(self.headers.keys())}")
 
+        if config.offline_mode:
+            if config.debug:
+                print("Offline mode")
+            try:
+                offline_file = CACHE_DIR + os.sep + url.split("/")[-1]
+                with open(offline_file) as f:
+                    response = json.load(f)
+                if config.debug:
+                    print("Loaded %s" % (offline_file))
+            except FileNotFoundError:
+                print("File not found.")
+                print("Please download the file from %s and place it in %s" % (url, offline_file))
+            try:
+                return response
+            except UnboundLocalError:
+                return {
+                    "Response": "Failure",
+                    "Type": 2
+                }
+
+
         response = requests.get(url, headers=self.headers, timeout=self.TIME_OUT)
 
         if response.status_code in [401, 402, 403, 429, 502, 503, 504]:
