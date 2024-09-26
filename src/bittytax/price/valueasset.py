@@ -1,7 +1,7 @@
 # -*- coding: utf-8 -*-
 # (c) Nano Nano Ltd 2019
 
-from datetime import datetime
+from datetime import datetime, timedelta
 from decimal import Decimal
 from typing import Dict, Optional, Tuple
 
@@ -83,7 +83,7 @@ class ValueAsset:
     ) -> Tuple[Optional[Decimal], AssetName, DataSourceName]:
         asset_price_ccy = None
 
-        if not self.price_tool and timestamp.date() >= datetime.now().date():
+        if not self.price_tool and timestamp.date() >= datetime.now().date() and not config.offline_mode:
             tqdm.write(
                 f"{WARNING} Price for {asset} on {timestamp:%Y-%m-%d}, "
                 f"no historic price available, using latest price"
@@ -131,6 +131,17 @@ class ValueAsset:
         self, asset: AssetSymbol
     ) -> Tuple[Optional[Decimal], AssetName, DataSourceName]:
         asset_price_ccy = None
+
+        if config.offline_mode:
+            for i in range(0, 1000):
+                try:
+                    cache_date = datetime.now() - timedelta(days=i)
+                    cached_price = self.get_historical_price(asset, cache_date)
+                    if config.debug:
+                        print(f"Loaded cached {asset} price from {cache_date}")
+                    return cached_price
+                except TypeError:
+                    pass
 
         if asset == "BTC" or asset in config.fiat_list:
             asset_price_ccy, name, data_source = self.price_data.get_latest(asset, config.ccy)
