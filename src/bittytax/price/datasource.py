@@ -73,6 +73,7 @@ class DataSourceBase:
         self.assets: Dict[AssetSymbol, DsSymbolToAssetData] = {}
         self.ids: Dict[AssetId, DsIdToAssetData] = {}
         self.prices = self._load_prices()
+        self.latest_cache: Dict[TradingPair, DsLatestCacheEntry] = self._load_latest_cache()
 
         self.api_lock = threading.Lock()
         self._thread_local = threading.local()
@@ -271,9 +272,31 @@ class DataSourceBase:
                         for date, price in json_prices[pair].items()
                     }
                     for pair in json_prices
+                    if pair != "__latest__"
                 }
         except (IOError, ValueError):
             print(f"{WARNING} Data cached for {self.name()} could not be loaded")
+            return {}
+
+    def _load_latest_cache(self) -> Dict[TradingPair, DsLatestCacheEntry]:
+        filename = os.path.join(CACHE_DIR, self.name() + ".json")
+        if not os.path.exists(filename):
+            return {}
+
+        try:
+            with open(filename, "r", encoding="utf-8") as price_cache:
+                json_prices = json.load(price_cache)
+                if "__latest__" not in json_prices:
+                    return {}
+                return {
+                    TradingPair(pair): DsLatestCacheEntry(
+                        price=self.str_to_decimal(entry["price"]),
+                        url=SourceUrl(entry["url"]),
+                        fetched_at=entry["fetched_at"],
+                    )
+                    for pair, entry in json_prices["__latest__"].items()
+                }
+        except (IOError, ValueError):
             return {}
 
     def _cache_prices(self) -> None:
@@ -292,6 +315,15 @@ class DataSourceBase:
                 }
                 for pair in self.prices
             }
+            if self.latest_cache:
+                json_prices["__latest__"] = {
+                    pair: {
+                        "price": self.decimal_to_str(entry["price"]),
+                        "url": entry["url"],
+                        "fetched_at": entry["fetched_at"],
+                    }
+                    for pair, entry in self.latest_cache.items()
+                }
             json.dump(json_prices, price_cache, indent=4, sort_keys=True)
 
     def cache_latest_price(
