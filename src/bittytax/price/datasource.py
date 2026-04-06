@@ -271,6 +271,8 @@ class DataSourceBase:
             return {}
 
     def _cache_prices(self) -> None:
+        if not os.path.exists(CACHE_DIR):
+            os.mkdir(CACHE_DIR)
         with open(
             os.path.join(CACHE_DIR, self.name() + ".json"), "w", encoding="utf-8"
         ) as price_cache:
