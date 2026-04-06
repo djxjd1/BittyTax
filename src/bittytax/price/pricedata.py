@@ -52,10 +52,13 @@ class PriceData:
         if data_source.upper() in self.data_sources:
             if asset in self.data_sources[data_source.upper()].assets:
                 self.data_sources[data_source.upper()].progress_bar = self.progress_bar
-                return (
-                    self.data_sources[data_source.upper()].get_latest(asset, quote),
-                    self.data_sources[data_source.upper()].assets[asset]["name"],
-                )
+                ds = self.data_sources[data_source.upper()]
+
+                price = ds.get_latest(asset, quote)
+                if price is not None:
+                    pair = TradingPair(asset + "/" + quote)
+                    ds.cache_latest_price(pair, price, SourceUrl(""))
+                return price, ds.assets[asset]["name"]
 
             return None, AssetName("")
         raise UnexpectedDataSourceError(data_source, DataSourceBase.datasources_str())

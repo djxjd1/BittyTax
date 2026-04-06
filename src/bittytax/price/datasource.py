@@ -50,6 +50,12 @@ class DsPriceData(TypedDict):  # pylint: disable=too-few-public-methods
     url: SourceUrl
 
 
+class DsLatestCacheEntry(TypedDict):  # pylint: disable=too-few-public-methods
+    price: Optional[Decimal]
+    url: SourceUrl
+    fetched_at: str  # ISO format datetime string
+
+
 class DataSourceBase:
     USER_AGENT = (
         f"BittyTax/{__version__} Python/{platform.python_version()} "
@@ -287,6 +293,15 @@ class DataSourceBase:
                 for pair in self.prices
             }
             json.dump(json_prices, price_cache, indent=4, sort_keys=True)
+
+    def cache_latest_price(
+        self, pair: TradingPair, price: Optional[Decimal], url: SourceUrl
+    ) -> None:
+        self.latest_cache[pair] = DsLatestCacheEntry(
+            price=price,
+            url=url,
+            fetched_at=datetime.utcnow().isoformat(),
+        )
 
     def get_config_assets(self) -> None:
         for symbol in config.data_source_select:
