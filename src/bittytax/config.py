@@ -71,6 +71,8 @@ class Config:
     def __init__(self) -> None:
         self.terminal = os.getenv("BITTYTAX_TERMINAL")
         self.debug = False
+        self.offline = False
+        self.max_price_age = 30
         self.start_of_year_month = 4
         self.start_of_year_day = 6
 
