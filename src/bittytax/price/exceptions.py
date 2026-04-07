@@ -28,3 +28,8 @@ class UnexpectedDataSourceAssetIdError(DataSourceError):
             f"Invalid data source asset ID: '{self.data_source}' for '{self.value}' in "
             f"{os.path.join(BITTYTAX_PATH, config.BITTYTAX_CONFIG)}"
         )
+
+
+class OfflineModeError(DataSourceError):
+    def __str__(self) -> str:
+        return f"Offline mode is enabled; API call to '{self.data_source}' was blocked"
