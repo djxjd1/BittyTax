@@ -3,7 +3,7 @@
 
 from datetime import datetime
 from decimal import Decimal
-from typing import Dict, Optional, Tuple
+from typing import Dict, Optional, Set, Tuple
 
 from colorama import Fore, Style
 from typing_extensions import TypedDict
@@ -37,6 +37,7 @@ class ValueAsset:
     def __init__(self, price_tool: bool = False) -> None:
         self.price_tool = price_tool
         self.price_report: Dict[Year, Dict[AssetSymbol, Dict[Date, VaPriceReport]]] = {}
+        self._missing_prices: Set[Tuple[AssetSymbol, str, Date, bool]] = set()
         data_sources_required = set(config.data_source_fiat + config.data_source_crypto) | {
             x.split(":")[0] for v in config.data_source_select.values() for x in v
         }
@@ -125,6 +126,9 @@ class ValueAsset:
                 asset_price_btc,
             )
 
+        if asset_price_ccy is None and config.offline:
+            self._missing_prices.add((asset, config.ccy, Date(timestamp.date()), False))
+
         return asset_price_ccy, name, data_source
 
     def get_latest_price(
@@ -144,7 +148,24 @@ class ValueAsset:
                 if btc_price_ccy is not None:
                     asset_price_ccy = btc_price_ccy * asset_price_btc
 
+        if asset_price_ccy is None and config.offline:
+            self._missing_prices.add((asset, config.ccy, Date(datetime.now().date()), True))
+
         return asset_price_ccy, name, data_source
+
+    def report_missing_prices(self) -> None:
+        if not self._missing_prices:
+            return
+        bt_tqdm_write(
+            f"\n{WARNING} Offline mode: {len(self._missing_prices)} price(s) missing from cache:"
+        )
+        for asset, quote, date, is_latest in sorted(self._missing_prices):
+            kind = "latest" if is_latest else str(date)
+            bt_tqdm_write(f"  {asset}/{quote} [{kind}]")
+        bt_tqdm_write(
+            "\nTo populate cache (online): bittytax_price historic <asset> <date>"
+            "\nTo transfer cache:          bittytax_price cache export / import"
+        )
 
     def price_report_cache(
         self,
