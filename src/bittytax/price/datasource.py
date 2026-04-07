@@ -32,7 +32,7 @@ from ..bt_types import (
 from ..config import config
 from ..constants import CACHE_DIR, WARNING
 from ..version import __version__
-from .exceptions import UnexpectedDataSourceAssetIdError
+from .exceptions import OfflineModeError, UnexpectedDataSourceAssetIdError
 
 
 class DsSymbolToAssetData(TypedDict):  # pylint: disable=too-few-public-methods
@@ -149,6 +149,9 @@ class DataSourceBase:
         return False, None
 
     def get_json(self, url: str) -> Any:
+        if config.offline:
+            raise OfflineModeError(self.name())
+
         with self.api_lock:
             session = self._get_session()
 
@@ -335,6 +338,16 @@ class DataSourceBase:
             fetched_at=datetime.utcnow().isoformat(),
         )
 
+    def _infer_assets_from_cache(self) -> None:
+        for pair in self.prices:
+            asset = AssetSymbol(pair.split("/")[0])
+            if asset not in self.assets:
+                self.assets[asset] = {"asset_id": AssetId(""), "name": AssetName(asset)}
+        for pair in self.latest_cache:
+            asset = AssetSymbol(pair.split("/")[0])
+            if asset not in self.assets:
+                self.assets[asset] = {"asset_id": AssetId(""), "name": AssetName(asset)}
+
     def get_config_assets(self) -> None:
         for symbol in config.data_source_select:
             for ds_select in config.data_source_select[symbol]:
@@ -412,10 +425,13 @@ class DataSourceBase:
 class BittyTaxAPI(DataSourceBase):
     def __init__(self) -> None:
         super().__init__()
-        json_resp = self.get_json("https://api.bitty.tax/v1/symbols")
-        self.assets = {
-            k: {"asset_id": AssetId(""), "name": v} for k, v in json_resp["symbols"].items()
-        }
+        try:
+            json_resp = self.get_json("https://api.bitty.tax/v1/symbols")
+            self.assets = {
+                k: {"asset_id": AssetId(""), "name": v} for k, v in json_resp["symbols"].items()
+            }
+        except OfflineModeError:
+            self._infer_assets_from_cache()
 
     def get_latest(
         self, asset: AssetSymbol, quote: QuoteSymbol, _asset_id: AssetId = AssetId("")
@@ -581,24 +597,33 @@ class CryptoCompare(DataSourceBase):
 
         self.api_root = "https://min-api.cryptocompare.com"
 
-        json_resp = self.get_json(f"{self.api_root}/data/all/coinlist")
-        if json_resp["Response"] != "Success":
-            raise RuntimeError(f"CryptoCompare API failure: {json_resp}")
+        try:
+            json_resp = self.get_json(f"{self.api_root}/data/all/coinlist")
+            if json_resp["Response"] != "Success":
+                raise RuntimeError(f"CryptoCompare API failure: {json_resp}")
 
-        # CryptoCompare symbols are unique, so can be used as the ID
-        self.ids = {
-            c[1]["Symbol"]
-            .strip()
-            .lower(): {"symbol": c[1]["Symbol"].strip().upper(), "name": c[1]["CoinName"].strip()}
-            for c in json_resp["Data"].items()
-        }
-        self.assets = {
-            c[1]["Symbol"]
-            .strip()
-            .upper(): {"asset_id": c[1]["Symbol"].strip().lower(), "name": c[1]["CoinName"].strip()}
-            for c in json_resp["Data"].items()
-        }
-        self.get_config_assets()
+            # CryptoCompare symbols are unique, so can be used as the ID
+            self.ids = {
+                c[1]["Symbol"]
+                .strip()
+                .lower(): {
+                    "symbol": c[1]["Symbol"].strip().upper(),
+                    "name": c[1]["CoinName"].strip(),
+                }
+                for c in json_resp["Data"].items()
+            }
+            self.assets = {
+                c[1]["Symbol"]
+                .strip()
+                .upper(): {
+                    "asset_id": c[1]["Symbol"].strip().lower(),
+                    "name": c[1]["CoinName"].strip(),
+                }
+                for c in json_resp["Data"].items()
+            }
+            self.get_config_assets()
+        except OfflineModeError:
+            self._infer_assets_from_cache()
 
     def _check_rate_limit_in_response(self, json_resp: Any) -> Tuple[bool, Optional[int]]:
         """
@@ -690,28 +715,31 @@ class CoinGecko(DataSourceBase):
             CoinGecko.RATE_LIMIT = 2
             self.api_root = "https://api.coingecko.com/api/v3"
 
-        json_resp = self.get_json(f"{self.api_root}/coins/list?status=active")
-        self.ids = {
-            c["id"]: {"symbol": c["symbol"].strip().upper(), "name": c["name"].strip()}
-            for c in json_resp
-        }
-        self.assets = {
-            c["symbol"].strip().upper(): {"asset_id": c["id"], "name": c["name"].strip()}
-            for c in json_resp
-        }
-        if self.PRO_KEY in self.headers:
-            json_resp = self.get_json(f"{self.api_root}/coins/list?status=inactive")
-            for c in json_resp:
-                self.ids[c["id"]] = {
-                    "symbol": c["symbol"].strip().upper(),
-                    "name": c["name"].strip(),
-                }
-            for c in json_resp:
-                self.assets[c["symbol"].strip().upper()] = {
-                    "asset_id": c["id"],
-                    "name": c["name"].strip(),
-                }
-        self.get_config_assets()
+        try:
+            json_resp = self.get_json(f"{self.api_root}/coins/list?status=active")
+            self.ids = {
+                c["id"]: {"symbol": c["symbol"].strip().upper(), "name": c["name"].strip()}
+                for c in json_resp
+            }
+            self.assets = {
+                c["symbol"].strip().upper(): {"asset_id": c["id"], "name": c["name"].strip()}
+                for c in json_resp
+            }
+            if self.PRO_KEY in self.headers:
+                json_resp = self.get_json(f"{self.api_root}/coins/list?status=inactive")
+                for c in json_resp:
+                    self.ids[c["id"]] = {
+                        "symbol": c["symbol"].strip().upper(),
+                        "name": c["name"].strip(),
+                    }
+                for c in json_resp:
+                    self.assets[c["symbol"].strip().upper()] = {
+                        "asset_id": c["id"],
+                        "name": c["name"].strip(),
+                    }
+            self.get_config_assets()
+        except OfflineModeError:
+            self._infer_assets_from_cache()
 
     def get_latest(
         self, asset: AssetSymbol, quote: QuoteSymbol, asset_id: AssetId = AssetId("")
@@ -787,16 +815,19 @@ class CoinPaprika(DataSourceBase):
             CoinPaprika.RATE_LIMIT = 2
             self.api_root = "https://api.coinpaprika.com/v1"
 
-        json_resp = self.get_json(f"{self.api_root}/coins")
-        self.ids = {
-            c["id"]: {"symbol": c["symbol"].strip().upper(), "name": c["name"].strip()}
-            for c in json_resp
-        }
-        self.assets = {
-            c["symbol"].strip().upper(): {"asset_id": c["id"], "name": c["name"].strip()}
-            for c in json_resp
-        }
-        self.get_config_assets()
+        try:
+            json_resp = self.get_json(f"{self.api_root}/coins")
+            self.ids = {
+                c["id"]: {"symbol": c["symbol"].strip().upper(), "name": c["name"].strip()}
+                for c in json_resp
+            }
+            self.assets = {
+                c["symbol"].strip().upper(): {"asset_id": c["id"], "name": c["name"].strip()}
+                for c in json_resp
+            }
+            self.get_config_assets()
+        except OfflineModeError:
+            self._infer_assets_from_cache()
 
     def get_latest(
         self, asset: AssetSymbol, quote: QuoteSymbol, asset_id: AssetId = AssetId("")
