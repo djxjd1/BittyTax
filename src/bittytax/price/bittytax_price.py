@@ -75,6 +75,17 @@ def main() -> None:
         type=str.upper,
         help="specify the data source to use, or all",
     )
+    parser_latest.add_argument(
+        "--offline", action="store_true", help="use only cached price data"
+    )
+    parser_latest.add_argument(
+        "--max-price-age",
+        type=int,
+        default=30,
+        dest="max_price_age",
+        metavar="DAYS",
+        help="accept cached 'latest' prices up to DAYS old (default: 30, used with --offline)",
+    )
     parser_latest.add_argument("-d", "--debug", action="store_true", help="enable debug logging")
 
     parser_history = subparsers.add_parser(
@@ -112,6 +123,9 @@ def main() -> None:
         dest="no_cache",
         action="store_true",
         help="bypass data cache",
+    )
+    parser_history.add_argument(
+        "--offline", action="store_true", help="use only cached price data"
     )
     parser_history.add_argument("-d", "--debug", action="store_true", help="enable debug logging")
 
@@ -218,6 +232,8 @@ def main() -> None:
 
     args = parser.parse_args()
     config.debug = args.debug
+    config.offline = getattr(args, "offline", False)
+    config.max_price_age = getattr(args, "max_price_age", 30)
 
     if config.debug:
         print(f"{Fore.YELLOW}{version_str}")
@@ -285,9 +301,38 @@ def main() -> None:
             parser.exit(message=f"{ERROR} {e}\n")
 
         if not asset:
+            if config.offline:
+                parser.exit(
+                    message=f"{WARNING} No cached data found for {symbol}.\n"
+                    f"  Populate the cache online:\n"
+                    f"    bittytax_price historic {symbol} <date>\n"
+                    f"  Or import a cache file from another machine:\n"
+                    f"    bittytax_price cache import <file>\n"
+                )
             parser.exit(message=f"{WARNING} Prices for {symbol} are not supported\n")
 
         if not price:
+            if config.offline:
+                if args.command == CMD_HISTORY:
+                    date_str = f"{args.date[0]:%Y-%m-%d}"
+                    parser.exit(
+                        message=f"{WARNING} No cached price for {symbol} on {date_str}.\n"
+                        f"  Populate the cache online:\n"
+                        f"    bittytax_price historic {symbol} {date_str}\n"
+                        f"  Or import a cache file from another machine:\n"
+                        f"    bittytax_price cache import <file>\n"
+                    )
+                else:
+                    parser.exit(
+                        message=f"{WARNING} No cached 'latest' price for {symbol} "
+                        f"within {config.max_price_age} day(s).\n"
+                        f"  Populate the cache online:\n"
+                        f"    bittytax_price latest {symbol}\n"
+                        f"  Or increase the accepted age:\n"
+                        f"    bittytax_price latest {symbol} --offline --max-price-age <days>\n"
+                        f"  Or import a cache file from another machine:\n"
+                        f"    bittytax_price cache import <file>\n"
+                    )
             if args.command == CMD_HISTORY:
                 parser.exit(
                     message=f"{WARNING} Price for {symbol} on {args.date[0]:%Y-%m-%d} "
@@ -361,6 +406,7 @@ def do_cache_info(datasource_filter: str) -> None:
 
         if ds.latest_cache:
             print(f"  {Fore.YELLOW}Latest cache:")
+            now = _os.path.getmtime(cache_file)
             for pair, entry in sorted(ds.latest_cache.items()):
                 from datetime import datetime as _dt
 
@@ -449,8 +495,9 @@ def do_cache_export(
 
 def do_cache_import(input_file: str, overwrite: bool) -> None:
     import json as _json
+    from decimal import Decimal as _Decimal
 
-    from ..bt_types import SourceUrl as _SourceUrl, TradingPair as _TP
+    from ..bt_types import Date as _Date, SourceUrl as _SourceUrl, TradingPair as _TP
     from .datasource import DsLatestCacheEntry as _LatestEntry
 
     config.offline = True
