@@ -117,6 +117,19 @@ def main() -> None:
         action="store_true",
         help="export your transaction records populated with price data",
     )
+    parser.add_argument(
+        "--offline",
+        action="store_true",
+        help="use only cached price data; no API calls will be made",
+    )
+    parser.add_argument(
+        "--max-price-age",
+        type=int,
+        default=30,
+        dest="max_price_age",
+        metavar="DAYS",
+        help="in offline mode, accept 'latest' prices from cache up to DAYS old (default: 30)",
+    )
 
     args = parser.parse_args()
     try:
@@ -125,6 +138,8 @@ def main() -> None:
         raise RuntimeError(f"Unrecognised args.tax_rules: {args.tax_rules}") from e
 
     config.debug = args.debug
+    config.offline = args.offline
+    config.max_price_age = args.max_price_age
 
     if config.debug:
         print(f"{Fore.YELLOW}{version_str}")
@@ -173,6 +188,9 @@ def main() -> None:
                 tax.process_margin_trades()
 
             _do_each_tax_year(tax, args.tax_year, args.summary_only, value_asset)
+
+            if config.offline:
+                value_asset.report_missing_prices()
 
         except DataSourceError as e:
             parser.exit(message=f"{ERROR} {e}\n")
