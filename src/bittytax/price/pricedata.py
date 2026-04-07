@@ -2,6 +2,7 @@
 # (c) Nano Nano Ltd 2019
 
 import os
+from datetime import datetime
 from decimal import Decimal
 from typing import List, Optional, Tuple
 
@@ -54,6 +55,23 @@ class PriceData:
                 self.data_sources[data_source.upper()].progress_bar = self.progress_bar
                 ds = self.data_sources[data_source.upper()]
 
+                if config.offline:
+                    pair = TradingPair(asset + "/" + quote)
+                    # 1. Try latest_cache within max_price_age
+                    if pair in ds.latest_cache:
+                        entry = ds.latest_cache[pair]
+                        fetched_at = datetime.fromisoformat(entry["fetched_at"])
+                        age_days = (datetime.utcnow() - fetched_at).days
+                        if age_days <= config.max_price_age:
+                            return entry["price"], ds.assets[asset]["name"]
+                    # 2. Fall back to most recent historical entry within max_price_age
+                    if pair in ds.prices and ds.prices[pair]:
+                        most_recent = max(ds.prices[pair].keys())
+                        age_days = (datetime.utcnow().date() - most_recent).days
+                        if age_days <= config.max_price_age:
+                            return ds.prices[pair][most_recent]["price"], ds.assets[asset]["name"]
+                    return None, ds.assets[asset]["name"]
+
                 price = ds.get_latest(asset, quote)
                 if price is not None:
                     pair = TradingPair(asset + "/" + quote)
@@ -77,6 +95,10 @@ class PriceData:
                 date = Date(timestamp.date())
                 pair = TradingPair(asset + "/" + quote)
 
+                # In offline mode, --nocache is ignored and no API call is made
+                if config.offline:
+                    no_cache = False
+
                 if not no_cache:
                     # Check cache first
                     if (
@@ -88,6 +110,13 @@ class PriceData:
                             self.data_sources[data_source.upper()].assets[asset]["name"],
                             self.data_sources[data_source.upper()].prices[pair][date]["url"],
                         )
+
+                if config.offline:
+                    return (
+                        None,
+                        self.data_sources[data_source.upper()].assets[asset]["name"],
+                        SourceUrl(""),
+                    )
 
                 self.data_sources[data_source.upper()].get_historical(asset, quote, timestamp)
                 if (
