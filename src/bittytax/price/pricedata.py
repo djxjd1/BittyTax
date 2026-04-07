@@ -112,7 +112,9 @@ class PriceData:
     ) -> Tuple[Optional[Decimal], AssetName, DataSourceName]:
         name = AssetName("")
         for data_source in self.data_source_priority(asset):
-            price, name = self.get_latest_ds(data_source, asset, quote)
+            price, _name = self.get_latest_ds(data_source, asset, quote)
+            if _name:
+                name = _name
             if price is not None:
                 if config.debug:
                     print(
@@ -133,9 +135,11 @@ class PriceData:
     ) -> Tuple[Optional[Decimal], AssetName, DataSourceName, SourceUrl]:
         name = AssetName("")
         for data_source in self.data_source_priority(asset):
-            price, name, url = self.get_historical_ds(
+            price, _name, url = self.get_historical_ds(
                 data_source, asset, quote, timestamp, no_cache
             )
+            if _name:
+                name = _name
             if price is not None:
                 if config.debug:
                     print(
